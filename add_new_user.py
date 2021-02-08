@@ -1,7 +1,7 @@
 import boto3
 from botocore.client import ClientError
-import random, string
-
+import random
+import string
 
 '''Create new user, give SupportUser policy and specify temporary password'''
 
@@ -20,14 +20,22 @@ except ClientError as e:
         print(error)
         exit()
 
-
 print('Creating login, password for user:', user_name)
 password = ''.join(random.choice(string.ascii_letters) for i in range(10)) + '!'
 
 login_password = iam.create_login_profile(
-        UserName=user_name,
-        Password=password
+    UserName=user_name,
+    Password=password
 )
+
+print('Creating user credentials')
+access_key = iam.create_access_key(
+    UserName=user_name
+)
+
 with open(f'{user_name} credentials.txt', 'w+') as credentials:
-    credentials.write(f'Login: {user_name}\n'
-                      f'Password: {password}')
+    credentials.write(f"Login: {user_name}\n"
+                      f"Password: {password}\n"
+                      f"Access Key Id: {access_key['AccessKey']['AccessKeyId']}\n"
+                      f"Secret Access Key: {access_key['AccessKey']['SecretAccessKey']}"
+                      )
