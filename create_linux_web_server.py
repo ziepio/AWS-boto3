@@ -20,9 +20,18 @@ try:
     sg_ingress_rules = ec2.authorize_security_group_ingress(
         GroupName=security_group_name,
         IpPermissions=[
-            {'FromPort': 80, 'IpProtocol': 'tcp', 'ToPort': 80},
-            {'FromPort': 443, 'IpProtocol': 'tcp', 'ToPort': 443},
-            {'FromPort': 22, 'IpProtocol': 'tcp', 'ToPort': 22}
+            {'FromPort': 80,
+             'IpProtocol': 'tcp',
+             'ToPort': 80,
+             'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+            {'FromPort': 443,
+             'IpProtocol': 'tcp',
+             'ToPort': 443,
+             'IpRanges': [{'CidrIp': '0.0.0.0/0'}]},
+            {'FromPort': 22,
+             'IpProtocol': 'tcp',
+             'ToPort': 22,
+             'IpRanges': [{'CidrIp': '0.0.0.0/0'}]}
         ]
     )
     print('ok')
