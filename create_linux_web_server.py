@@ -2,9 +2,11 @@ import boto3
 from botocore.client import ClientError
 
 
+'''Create Security Group, EC2 instance associated with Elastic IP address 
+and connected to domain in Route53.'''
+
 ec2 = boto3.client('ec2')
 security_group_name = 'linux-web-server-security-group'
-
 
 print(f'Create security group {security_group_name}: ', end='')
 vpc_id = 'vpc-262faa4c'
@@ -42,19 +44,23 @@ except ClientError as e:
 
 
 print('Creating key pair: ', end='')
-key_name = 'linux-keypair'
+keypair_name = 'linux-server-keypair'
+try:
+    key_pair = ec2.create_key_pair(
+        KeyName=keypair_name
+    )
+    print('ok')
 
-key_pair = ec2.create_key_pair(
-    KeyName=key_name
-)
-print('ok')
-
-with open(f'{key_name}.pem', 'w+') as credentials:
-    credentials.write(key_pair['KeyMaterial'])
+    with open(f'{keypair_name}.pem', 'w+') as credentials:
+        credentials.write(key_pair['KeyMaterial'])
+except ClientError as e:
+    error = e.response['Error']
+    print(error['Message'])
 
 
+server_name = 'linux-server'
 amazon_linux_2_ami = 'ami-0a6dc7529cd559185'
-settings_scrip = '''#!/bin/bash
+user_data = '''#!/bin/bash
 sudo yum update -y
 sudo yum install httpd -y
 sudo systemctl start httpd
@@ -62,14 +68,35 @@ sudo systemctl start httpd
 
 print('Running instance..')
 instance = ec2.run_instances(
+    BlockDeviceMappings=[
+        {
+            'DeviceName': '/dev/xvda',
+            'Ebs': {
+                'DeleteOnTermination': True,
+                'VolumeSize': 8,
+                'VolumeType': 'gp2'
+            }
+        }
+    ],
     ImageId=amazon_linux_2_ami,
     InstanceType='t2.micro',
-    KeyName=key_pair['KeyName'],
+    KeyName=keypair_name,
     MaxCount=1,
     MinCount=1,
     Monitoring={'Enabled': False},
     SecurityGroups=[security_group_name],
-    UserData=settings_scrip
+    UserData=user_data,
+    TagSpecifications=[
+        {
+            'ResourceType': 'instance',
+            'Tags': [
+                {
+                    'Key': 'Name',
+                    'Value': server_name
+                }
+            ]
+        }
+    ]
 )
 
 instance_id = instance['Instances'][0]['InstanceId']
@@ -96,7 +123,7 @@ new_record_name = ''                                    # enter Route53 new reco
 
 print('Redirecting instance address to Route53 hosted zone: ', end='')
 try:
-    x = route53.change_resource_record_sets(
+    associate_new_record = route53.change_resource_record_sets(
         HostedZoneId=hosted_zone_id,
         ChangeBatch={
             'Comment': f'Add {new_record_name}',
