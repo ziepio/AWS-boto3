@@ -1,6 +1,7 @@
 import boto3
 from botocore.client import ClientError
 from datetime import datetime
+import time
 import json
 
 
@@ -13,9 +14,17 @@ acm_north_virginia = boto3.client('acm', region_name='us-east-1')
 domain_name = ''                                                    # enter domain name
 certificate_not_exists = True
 
-print('Request certificate: ', end='')
-try:
-    certificate_request = acm_north_virginia.request_certificate(
+print('Requesting and validating certificate: ', end='')
+certificates_list = acm_north_virginia.list_certificates(CertificateStatuses=['ISSUED'])
+for i in certificates_list['CertificateSummaryList']:
+    if i['DomainName'] == domain_name:
+        certificate_arn = i['CertificateArn']
+        certificate_not_exists = False
+        print('certificate already exists')
+
+
+if certificate_not_exists:
+    certificate = acm_north_virginia.request_certificate(
         DomainName=domain_name,
         ValidationMethod='DNS',
         Tags=[{
@@ -23,24 +32,17 @@ try:
             'Value': f'Certificate for {domain_name}'
         }]
     )
-    print('ok')
-except ClientError as e:
-    error = e.response['Error']
-    if error['Message'] == '???':
-        certificate_not_exists = False
-        print('Already exists')
-    else:
-        print(error['Message'])
+    time.sleep(10)
 
-
-if certificate_not_exists:
-    certificate_arn = certificate_request['CertificateArn']
-    describe_certificate = acm_north_virginia.describe_certificate(CertificateArn=certificate_arn)
+    certificate_arn = certificate['CertificateArn']
+    desc_certificate = acm_north_virginia.describe_certificate(CertificateArn=certificate_arn)
 
     route53 = boto3.client('route53')
-    hosted_zone = ''                                    # enter hosted zone
+    hosted_zone = ''                        # enter hosted zone
+    cer_name = desc_certificate['Certificate']['DomainValidationOptions'][0]['ResourceRecord']['Name']
+    cer_type = desc_certificate['Certificate']['DomainValidationOptions'][0]['ResourceRecord']['Type']
+    cer_value = desc_certificate['Certificate']['DomainValidationOptions'][0]['ResourceRecord']['Value']
 
-    print('Add CNAME record: ', end='')
     add_cname = route53.change_resource_record_sets(
         HostedZoneId=hosted_zone,
         ChangeBatch={
@@ -49,24 +51,20 @@ if certificate_not_exists:
                 {
                     'Action': 'CREATE',
                     'ResourceRecordSet': {
-                        'Name': describe_certificate['Certificate']['DomainValidationOptions'][0]['ResourceRecord']['Name'],
-                        'Type': describe_certificate['Certificate']['DomainValidationOptions'][0]['ResourceRecord']['Type'],
+                        'Name': cer_name,
+                        'Type': cer_type,
                         'TTL': 300,
                         'ResourceRecords': [{
-                            'Value': describe_certificate['Certificate']['DomainValidationOptions'][0]['ResourceRecord']['Value']
+                            'Value': cer_value
                         }]
                     }
                 }
             ]
         }
     )
-    print('ok')
-
-    print('Waiting for issued status: ', end='')
     waiter = acm_north_virginia.get_waiter('certificate_validated')
     waiter.wait(CertificateArn=certificate_arn)
-    print('ok')
-
+    print('certificate issued')
 
 cloudfront = boto3.client('cloudfront')
 
@@ -91,14 +89,14 @@ distribution = cloudfront.create_distribution(
                     ]
         },
         'DefaultCacheBehavior': {
-            'TargetOriginId': 'string',                     # <<< ???
+            'TargetOriginId': f'S3-{domain_name}',
             'ViewerProtocolPolicy': 'redirect-to-https'
         },
         'Comment': f'HTTPS for {domain_name}',
         'Enabled': True,
         'ViewerCertificate': {
             'CloudFrontDefaultCertificate': False,
-            'ACMCertificateArn': certificate_request['CertificateArn'],
+            'ACMCertificateArn': certificate_arn,
             'SSLSupportMethod': 'sni-only',
             'MinimumProtocolVersion': 'TLSv1.2_2019'
         },
